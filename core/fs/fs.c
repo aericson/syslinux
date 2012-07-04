@@ -14,7 +14,6 @@ char *PATH;
 
 /* The currently mounted filesystem */
 struct fs_info *this_fs = NULL;		/* Root filesystem */
-struct fs_info *fs_array[256][4];
 
 /* Actual file structures (we don't have malloc yet...) */
 struct file files[MAX_OPEN];
@@ -221,6 +220,7 @@ const struct fs_ops *fs_ops_array [4] = {
 
 struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
 {
+    struct fs_info *fsp;
     struct fs_info fs;
     uint8_t disk_devno, disk_cdrom;
     sector_t disk_offset;
@@ -232,8 +232,9 @@ struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
     int blk_shift = -1;
     struct device *dev = NULL;
 
-    if (fs_array[hdd][partition - 1])
-        return fs_array[hdd][partition - 1];
+    fsp = get_fs(hdd, partition - 1);
+    if (fsp)
+        return fsp;
 
     disk_devno = 0x80 + hdd;
 
@@ -293,7 +294,8 @@ struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
         while (1)
             ;
     }
-    fs_array[hdd][partition - 1] = &fs;
+    add_fs(&fs, hdd, partition - 1);
+    fsp = &fs;
 
     /* initialize the cache */
     if (fs.fs_dev && fs.fs_dev->cache_data)
@@ -306,10 +308,10 @@ struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
     }
 
     if (fs.fs_ops->chdir_start) {
-        if (fs.fs_ops->chdir_start(fs_array[hdd][partition -1]) < 0)
+        if (fs.fs_ops->chdir_start(fsp) < 0)
             printf("Failed to chdir to start directory\n");
     }
-    return fs_array[hdd][partition - 1];
+    return fsp;
 }
 
 
