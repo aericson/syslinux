@@ -65,7 +65,7 @@ size_t realpath(char *dst, const char *src, size_t bufsize)
     if (this_fs->fs_ops->realpath) {
 	s = this_fs->fs_ops->realpath(this_fs, dst, src, bufsize);
     } else {
-	rv = searchdir(src);
+	rv = searchdir(src, NULL);
 	if (rv < 0) {
 	    dprintf("realpath: searchpath failure\n");
 	    return -1;
@@ -97,7 +97,7 @@ int chdir(const char *src)
 	return this_fs->fs_ops->chdir(this_fs, src);
 
     /* Otherwise it is a "conventional filesystem" */
-    rv = searchdir(src);
+    rv = searchdir(src, NULL);
     if (rv < 0)
 	return rv;
 
@@ -126,6 +126,56 @@ int chdir(const char *src)
 
     dprintf("chdir: final %s (inode %p)\n",
 	    this_fs->cwd_name, this_fs->cwd);
+
+    return 0;
+}
+
+/* won't merge this and chdir(const char*) to not break compatibility
+ * with unistd.h */
+int multidisk_chdir(const char *src, struct fs_info *fp)
+{
+    int rv;
+    struct file *file;
+    char cwd_buf[CURRENTDIR_MAX];
+    size_t s;
+
+    dprintf("chdir: from %s (inode %p) add %s\n",
+	    fp->cwd_name, fp->cwd, src);
+
+    if (fp->fs_ops->chdir)
+        return fp->fs_ops->chdir(fp, src);
+
+    /* Otherwise it is a "conventional filesystem" */
+    rv = searchdir(src, fp);
+
+    if (rv < 0)
+        return rv;
+
+    file = handle_to_file(rv);
+    if (file->inode->mode != DT_DIR) {
+        _close_file(file);
+        return -1;
+    }
+
+    put_inode(fp->cwd);
+    fp->cwd = get_inode(file->inode);
+    _close_file(file);
+
+    /* Save the current working directory */
+    s = generic_inode_to_path(fp->cwd, cwd_buf, CURRENTDIR_MAX-1);
+
+    /* Make sure the cwd_name ends in a slash, it's supposed to be a prefix */
+    if (s < 1 || cwd_buf[s-1] != '/')
+	cwd_buf[s++] = '/';
+
+    if (s >= CURRENTDIR_MAX)
+	s = CURRENTDIR_MAX - 1;
+
+    cwd_buf[s++] = '\0';
+    memcpy(fp->cwd_name, cwd_buf, s);
+
+    dprintf("chdir: final %s (inode %p)\n",
+	    fp->cwd_name, fp->cwd);
 
     return 0;
 }

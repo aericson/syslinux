@@ -1047,7 +1047,7 @@ static int pxe_chdir(struct fs_info *fs, const char *src)
     return 0;
 }
 
-static int pxe_chdir_start(void)
+static int pxe_chdir_start(struct fs_info *fp)
 {
 	get_prefix();
 	return 0;

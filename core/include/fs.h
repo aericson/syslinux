@@ -53,7 +53,7 @@ struct fs_ops {
     /* in fact, we use fs_ops structure to find the right fs */
     const char *fs_name;
     enum fs_flags fs_flags;
-    
+
     int      (*fs_init)(struct fs_info *);
     void     (*searchdir)(const char *, struct file *);
     uint32_t (*getfssec)(struct file *, char *, int, bool *);
@@ -61,7 +61,7 @@ struct fs_ops {
     void     (*mangle_name)(char *, const char *);
     size_t   (*realpath)(struct fs_info *, char *, const char *, size_t);
     int      (*chdir)(struct fs_info *, const char *);
-    int      (*chdir_start)(void);
+    int      (*chdir_start)(struct fs_info *fp);
     int      (*open_config)(struct com32_filedata *);
 
     struct inode * (*iget_root)(struct fs_info *);
@@ -188,8 +188,8 @@ extern char *PATH;
 /* fs.c */
 void pm_mangle_name(com32sys_t *);
 void pm_searchdir(com32sys_t *);
-void mangle_name(char *, const char *);
-int searchdir(const char *name);
+void mangle_name(char *, const char *, struct fs_info *);
+int searchdir(const char *name, struct fs_info *);
 void _close_file(struct file *);
 size_t pmapi_read_file(uint16_t *handle, void *buf, size_t sectors);
 int open_file(const char *name, struct com32_filedata *filedata);
@@ -202,6 +202,7 @@ int open_config(void);
 void pm_realpath(com32sys_t *regs);
 size_t realpath(char *dst, const char *src, size_t bufsize);
 int chdir(const char *src);
+int multidisk_chdir(const char *src, struct fs_info *fp);
 
 /* readdir.c */
 DIR *opendir(const char *pathname);
@@ -216,7 +217,7 @@ char *core_getcwd(char *buf, size_t size);
  */
 
 /* chdir.c */
-int generic_chdir_start(void);
+int generic_chdir_start(struct fs_info *);
 
 /* mangle.c */
 void generic_mangle_name(char *, const char *);

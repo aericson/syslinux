@@ -111,7 +111,7 @@ void execute(const char *cmdline, uint32_t type)
 
 		/* If we got anything on the command line, do a chdir */
 		if (*args)
-			mangle_name(config_cwd, args);
+			mangle_name(config_cwd, args, NULL);
 
 		start_ldlinux(argv);
 	} else if (type == IMAGE_TYPE_LOCALBOOT) {

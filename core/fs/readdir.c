@@ -12,7 +12,7 @@ DIR *opendir(const char *path)
     int rv;
     struct file *file;
 
-    rv = searchdir(path);
+    rv = searchdir(path, NULL);
     if (rv < 0)
 	return NULL;
 

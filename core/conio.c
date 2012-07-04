@@ -445,7 +445,7 @@ static void msg_viewimage(void)
 
 	*VGAFilePtr = '\0';	/* Zero-terminate filename */
 
-	mangle_name(VGAFileMBuf, VGAFileBuf);
+	mangle_name(VGAFileMBuf, VGAFileBuf, NULL);
 	f = fopen(VGAFileMBuf, "r");
 	if (!f) {
 		/* Not there */

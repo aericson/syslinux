@@ -7,12 +7,14 @@
 #include "core.h"
 #include "dev.h"
 #include "fs.h"
+#include "multidisk.h"
 #include "cache.h"
 
 char *PATH;
 
 /* The currently mounted filesystem */
 struct fs_info *this_fs = NULL;		/* Root filesystem */
+struct fs_info *fs_array[256][4];
 
 /* Actual file structures (we don't have malloc yet...) */
 struct file files[MAX_OPEN];
@@ -113,12 +115,15 @@ void pm_mangle_name(com32sys_t *regs)
     const char *src = MK_PTR(regs->ds, regs->esi.w[0]);
     char       *dst = MK_PTR(regs->es, regs->edi.w[0]);
 
-    mangle_name(dst, src);
+    mangle_name(dst, src, NULL);
 }
 
-void mangle_name(char *dst, const char *src)
+void mangle_name(char *dst, const char *src, struct fs_info *fp)
 {
-    this_fs->fs_ops->mangle_name(dst, src);
+    if (fp)
+        fp->fs_ops->mangle_name(dst, src);
+    else
+        this_fs->fs_ops->mangle_name(dst, src);
 }
 
 void getfssec(com32sys_t *regs)
@@ -200,12 +205,120 @@ size_t pmapi_read_file(uint16_t *handle, void *buf, size_t sectors)
     return bytes_read;
 }
 
+extern const struct fs_ops vfat_fs_ops;
+extern const struct fs_ops ext2_fs_ops;
+extern const struct fs_ops btrfs_fs_ops;
+extern const struct fs_ops ntfs_fs_ops;
+
+const struct fs_ops *fs_ops_array [4] = {
+    &vfat_fs_ops,
+    &ext2_fs_ops,
+    /* TODO: add btrfs */
+    /*&btrfs_fs_ops,*/
+    NULL,
+    NULL
+};
+
+struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
+{
+    struct fs_info fs;
+    uint8_t disk_devno, disk_cdrom;
+    sector_t disk_offset;
+    uint16_t disk_heads, disk_sectors, maxtransfer;
+    struct part_iter *iter = NULL;
+    uint8_t buff[512];
+    struct disk_info diskinfo;
+    const struct fs_ops **ops;
+    int blk_shift = -1;
+    struct device *dev = NULL;
+
+    if (fs_array[hdd][partition - 1])
+        return fs_array[hdd][partition - 1];
+
+    disk_devno = 0x80 + hdd;
+
+    /* For some unknown reason without this call to a "nop" function
+     * an infinite loop happens, must investigate later
+     * TODO: fix this */
+    do_magic(buff);
+
+    if (find_partition(&iter, disk_devno, partition)) {
+        printf("Failed to get partition\n");
+        return NULL;
+    }
+    else
+        dprintf("part_offset 0x%llx\n", iter->start_lba);
+
+    disk_offset = iter->start_lba;
+
+    if (disk_get_params(disk_devno, &diskinfo))
+        return NULL;
+
+    disk_heads = diskinfo.head;
+    disk_sectors = diskinfo.spt;
+
+    /* force those values for now 
+     * TODO: fix this */
+    disk_cdrom = 0;
+    maxtransfer = 127;
+
+    ops = fs_ops_array;
+
+
+    /* Default name for the root directory */
+    fs.cwd_name[0] = '/';
+
+    while ((blk_shift < 0) && *ops) {
+        /* set up the fs stucture */
+        fs.fs_ops = *ops;
+
+        /*
+         * This boldly assumes that we don't mix FS_NODEV filesystems
+         * with FS_DEV filesystems...
+         */
+        if (fs.fs_ops->fs_flags & FS_NODEV) {
+            fs.fs_dev = NULL;
+        } else {
+            if (!dev)
+            dev = device_init(disk_devno, disk_cdrom, disk_offset,
+                      disk_heads, disk_sectors, maxtransfer);
+            fs.fs_dev = dev;
+        }
+        /* invoke the fs-specific init code */
+        blk_shift = fs.fs_ops->fs_init(&fs);
+        ops++;
+    }
+    if (blk_shift < 0) {
+        printf("No valid file system found!\n");
+        while (1)
+            ;
+    }
+    fs_array[hdd][partition - 1] = &fs;
+
+    /* initialize the cache */
+    if (fs.fs_dev && fs.fs_dev->cache_data)
+        cache_init(fs.fs_dev, blk_shift);
+
+    /* start out in the root directory */
+    if (fs.fs_ops->iget_root) {
+        fs.root = fs.fs_ops->iget_root(&fs);
+        fs.cwd = get_inode(fs.root);
+    }
+
+    if (fs.fs_ops->chdir_start) {
+        if (fs.fs_ops->chdir_start(fs_array[hdd][partition -1]) < 0)
+            printf("Failed to chdir to start directory\n");
+    }
+    return fs_array[hdd][partition - 1];
+}
+
+
 void pm_searchdir(com32sys_t *regs)
 {
     char *name = MK_PTR(regs->ds, regs->edi.w[0]);
     int rv;
 
-    rv = searchdir(name);
+    rv = searchdir(name, NULL);
     if (rv < 0) {
 	regs->esi.w[0]  = 0;
 	regs->eax.l     = 0;
@@ -217,7 +330,7 @@ void pm_searchdir(com32sys_t *regs)
     }
 }
 
-int searchdir(const char *name)
+int searchdir(const char *name, struct fs_info *fp)
 {
     struct inode *inode = NULL;
     struct inode *parent = NULL;
@@ -228,10 +341,13 @@ int searchdir(const char *name)
 
     dprintf("searchdir: %s  root: %p  cwd: %p\n",
 	    name, this_fs->root, this_fs->cwd);
+    if (!fp)
+        fp = this_fs;
 
     if (!(file = alloc_file()))
 	goto err_no_close;
-    file->fs = this_fs;
+
+    file->fs = fp;
 
     /* if we have ->searchdir method, call it */
     if (file->fs->fs_ops->searchdir) {
@@ -245,7 +361,7 @@ int searchdir(const char *name)
 
     /* else, try the generic-path-lookup method */
 
-    parent = get_inode(this_fs->cwd);
+    parent = get_inode(fp->cwd);
     p = pathbuf = strdup(name);
     if (!pathbuf)
 	goto err;
@@ -254,7 +370,7 @@ int searchdir(const char *name)
     got_link:
 	if (*p == '/') {
 	    put_inode(parent);
-	    parent = get_inode(this_fs->root);
+	    parent = get_inode(fp->root);
 	}
 
 	do {
@@ -285,8 +401,8 @@ int searchdir(const char *name)
 		    }
 		}
 	    } else if (part[0] != '.' || part[1] != '\0') {
-		inode = this_fs->fs_ops->iget(part, parent);
-		if (!inode)
+	    inode = fp->fs_ops->iget(part, parent);
+	    if (!inode)
 		    goto err;
 		if (inode->mode == DT_LNK) {
 		    char *linkbuf, *q;
@@ -294,7 +410,7 @@ int searchdir(const char *name)
 		    int total_len = inode->size + name_len + 2;
 		    int link_len;
 
-		    if (!this_fs->fs_ops->readlink ||
+		    if (!fp->fs_ops->readlink ||
 			--symlink_count == 0       ||      /* limit check */
 			total_len > MAX_SYMLINK_BUF)
 			goto err;
@@ -303,7 +419,7 @@ int searchdir(const char *name)
 		    if (!linkbuf)
 			goto err;
 
-		    link_len = this_fs->fs_ops->readlink(inode, linkbuf);
+		    link_len = fp->fs_ops->readlink(inode, linkbuf);
 		    if (link_len <= 0) {
 			free(linkbuf);
 			goto err;
@@ -373,11 +489,70 @@ int open_file(const char *name, struct com32_filedata *filedata)
     int rv;
     struct file *file;
     char mangled_name[FILENAME_MAX];
+    uint8_t hdd = 0;
+    uint8_t partition = 0;
+    char buff[4];
+
+    if (name[0] == '(') {
+        char relative_name[FILENAME_MAX];
+        const char *c = name;
+        int i = 0;
+        int mult = 1;
+
+        /* get hdd number */
+        for (++c; *c != ' '; ++c)
+            buff[i++] = *c;
+        buff[i] = '\0';
+
+        /* str to uint8_t */
+        while (i--) {
+            hdd += (buff[i] - 48) * mult;
+            mult *= 10;
+        }
+
+        /* get partition number */
+        i = 0;
+        for (++c; *c != ')'; ++c)
+            buff[i++] = *c;
+        buff[i] = '\0';
+
+        /* str to uint8_t */
+        mult = 1;
+        while (i--) {
+            partition += (buff[i] - 48) * mult;
+            mult *= 10;
+        }
+
+        i = 0;
+        /* c was on ')' jump ':' and stop at beginning of path */
+        for (c += 2; *c; c++)
+            relative_name[i++] = *c;
+        relative_name[i] = '\0';
+
+        mangle_name(mangled_name, relative_name, get_fs_info(hdd, partition));
+
+        rv = searchdir(mangled_name, get_fs_info(hdd, partition));
+
+        if (rv < 0)
+            return rv;
+        file = handle_to_file(rv);
+
+        if (file->inode->mode != DT_REG) {
+            _close_file(file);
+            return -1;
+        }
+
+        filedata->size = file->inode->size;
+        filedata->blocklg2 = SECTOR_SHIFT(file->fs);
+        filedata->handle = rv;
+
+        return rv;
+    }
 
     dprintf("open_file %s\n", name);
 
-    mangle_name(mangled_name, name);
-    rv = searchdir(mangled_name);
+    mangle_name(mangled_name, name, NULL);
+    rv = searchdir(mangled_name, NULL);
 
     if (rv < 0)
 	return rv;
@@ -405,8 +580,8 @@ void pm_open_file(com32sys_t *regs)
 
     dprintf("pm_open_file %s\n", name);
 
-    mangle_name(mangled_name, name);
-    rv = searchdir(mangled_name);
+    mangle_name(mangled_name, name, NULL);
+    rv = searchdir(mangled_name, NULL);
     if (rv < 0) {
 	regs->eflags.l |= EFLAGS_CF;
     } else {
@@ -503,7 +678,7 @@ void fs_init(com32sys_t *regs)
     }
 
     if (fs.fs_ops->chdir_start) {
-	    if (fs.fs_ops->chdir_start() < 0)
+	    if (fs.fs_ops->chdir_start(NULL) < 0)
 		    printf("Failed to chdir to start directory\n");
     }
 

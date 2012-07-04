@@ -74,7 +74,7 @@ int disk_int13_retry(const com32sys_t * inreg, com32sys_t * outreg)
  */
 int disk_get_params(int disk, struct disk_info *const diskinfo)
 {
-    static com32sys_t inreg, outreg;
+    com32sys_t inreg, outreg;
     struct disk_ebios_eparam *eparam = NULL;
 
     memset(diskinfo, 0, sizeof *diskinfo);
