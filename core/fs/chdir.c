@@ -85,49 +85,7 @@ size_t realpath(char *dst, const char *src, size_t bufsize)
 
 int chdir(const char *src)
 {
-    int rv;
-    struct file *file;
-    char cwd_buf[CURRENTDIR_MAX];
-    size_t s;
-
-    dprintf("chdir: from %s (inode %p) add %s\n",
-	    this_fs->cwd_name, this_fs->cwd, src);
-
-    if (this_fs->fs_ops->chdir)
-	return this_fs->fs_ops->chdir(this_fs, src);
-
-    /* Otherwise it is a "conventional filesystem" */
-    rv = searchdir(src, NULL);
-    if (rv < 0)
-	return rv;
-
-    file = handle_to_file(rv);
-    if (file->inode->mode != DT_DIR) {
-	_close_file(file);
-	return -1;
-    }
-
-    put_inode(this_fs->cwd);
-    this_fs->cwd = get_inode(file->inode);
-    _close_file(file);
-
-    /* Save the current working directory */
-    s = generic_inode_to_path(this_fs->cwd, cwd_buf, CURRENTDIR_MAX-1);
-
-    /* Make sure the cwd_name ends in a slash, it's supposed to be a prefix */
-    if (s < 1 || cwd_buf[s-1] != '/')
-	cwd_buf[s++] = '/';
-
-    if (s >= CURRENTDIR_MAX)
-	s = CURRENTDIR_MAX - 1;
-
-    cwd_buf[s++] = '\0';
-    memcpy(this_fs->cwd_name, cwd_buf, s);
-
-    dprintf("chdir: final %s (inode %p)\n",
-	    this_fs->cwd_name, this_fs->cwd);
-
-    return 0;
+    return multidisk_chdir(src, this_fs);
 }
 
 /* won't merge this and chdir(const char*) to not break compatibility

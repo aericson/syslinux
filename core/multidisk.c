@@ -75,11 +75,6 @@ struct fs_info *get_fs(uint8_t disk, uint8_t partition)
     return NULL;
 }
 
-void do_magic(void *buff)
-{
-
-}
-
 int find_partition(struct part_iter **_iter, int drive, int partition)
 {
     struct part_iter *iter = NULL;

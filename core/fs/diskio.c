@@ -302,12 +302,16 @@ struct disk *disk_init(uint8_t devno, bool cdrom, sector_t part_start,
                        uint16_t bsHeads, uint16_t bsSecPerTrack,
 		       uint32_t MaxTransfer)
 {
-    static struct disk disk;
+    struct disk *disk;
     static __lowmem struct edd_disk_params edd_params;
     com32sys_t ireg, oreg;
     bool ebios;
     int sector_size;
     unsigned int hard_max_transfer;
+
+    disk = malloc(sizeof(struct disk));
+    if (!disk)
+        return NULL;
 
     memset(&ireg, 0, sizeof ireg);
     ireg.edx.b[0] = devno;
@@ -326,8 +330,8 @@ struct disk *disk_init(uint8_t devno, bool cdrom, sector_t part_start,
 	hard_max_transfer = 63;
 
 	/* CBIOS parameters */
-	disk.h = bsHeads;
-	disk.s = bsSecPerTrack;
+	disk->h = bsHeads;
+	disk->s = bsSecPerTrack;
 
 	if ((int8_t)devno < 0) {
 	    /* Get hard disk geometry from BIOS */
@@ -336,8 +340,8 @@ struct disk *disk_init(uint8_t devno, bool cdrom, sector_t part_start,
 	    __intcall(0x13, &ireg, &oreg);
 	    
 	    if (!(oreg.eflags.l & EFLAGS_CF)) {
-		disk.h = oreg.edx.b[1] + 1;
-		disk.s = oreg.ecx.b[0] & 63;
+		disk->h = oreg.edx.b[1] + 1;
+		disk->s = oreg.ecx.b[0] & 63;
 	    }
 	}
 
@@ -356,7 +360,7 @@ struct disk *disk_init(uint8_t devno, bool cdrom, sector_t part_start,
 	    /* Query EBIOS parameters */
 	    /* The memset() is needed once this function can be called
 	       more than once */
-	    /* memset(&edd_params, 0, sizeof edd_params);  */
+	    memset(&edd_params, 0, sizeof edd_params);
 	    edd_params.len = sizeof edd_params;
 
 	    ireg.eax.b[1] = 0x48;
@@ -377,43 +381,57 @@ struct disk *disk_init(uint8_t devno, bool cdrom, sector_t part_start,
 
     }
 
-    disk.disk_number   = devno;
-    disk.sector_size   = sector_size;
-    disk.sector_shift  = ilog2(sector_size);
-    disk.part_start    = part_start;
-    disk.secpercyl     = disk.h * disk.s;
-    disk.rdwr_sectors  = ebios ? edd_rdwr_sectors : chs_rdwr_sectors;
+    disk->disk_number   = devno;
+    disk->sector_size   = sector_size;
+    disk->sector_shift  = ilog2(sector_size);
+    disk->part_start    = part_start;
+    disk->secpercyl     = disk->h * disk->s;
+    disk->rdwr_sectors  = ebios ? edd_rdwr_sectors : chs_rdwr_sectors;
 
     if (!MaxTransfer || MaxTransfer > hard_max_transfer)
 	MaxTransfer = hard_max_transfer;
 
-    disk.maxtransfer   = MaxTransfer;
+    disk->maxtransfer   = MaxTransfer;
 
     dprintf("disk %02x cdrom %d type %d sector %u/%u offset %llu limit %u\n",
-	    devno, cdrom, ebios, sector_size, disk.sector_shift,
-	    part_start, disk.maxtransfer);
+	    devno, cdrom, ebios, sector_size, disk->sector_shift,
+	    part_start, disk->maxtransfer);
 
-    return &disk;
+    return disk;
 }
 
 
 /*
  * Initialize the device structure.
- *
- * NOTE: the disk cache needs to be revamped to support multiple devices...
  */
 struct device * device_init(uint8_t devno, bool cdrom, sector_t part_start,
                             uint16_t bsHeads, uint16_t bsSecPerTrack,
 			    uint32_t MaxTransfer)
 {
-    static struct device dev;
-    static __hugebss char diskcache[128*1024];
+    struct device *dev;
+    char *diskcache;
+    int cachesize = 128 * 1024;
 
-    dev.disk = disk_init(devno, cdrom, part_start,
-			 bsHeads, bsSecPerTrack, MaxTransfer);
+    dev = malloc(sizeof(struct device));
+    if (!dev)
+        goto bail;
 
-    dev.cache_data = diskcache;
-    dev.cache_size = sizeof diskcache;
+    diskcache = malloc(cachesize);
+    if (!diskcache)
+        goto bail;
 
-    return &dev;
+    memset(diskcache, 0, cachesize);
+
+    dev->disk = disk_init(devno, cdrom, part_start,
+			               bsHeads, bsSecPerTrack, MaxTransfer);
+
+    dev->cache_data = diskcache;
+    dev->cache_size = cachesize;
+
+    return dev;
+
+bail:
+    free(dev);
+    free(diskcache);
+    return NULL;
 }

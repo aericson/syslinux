@@ -36,6 +36,19 @@ struct inode *alloc_inode(struct fs_info *fs, uint32_t ino, size_t data)
     return inode;
 }
 
+extern const struct fs_ops vfat_fs_ops;
+extern const struct fs_ops ext2_fs_ops;
+extern const struct fs_ops btrfs_fs_ops;
+extern const struct fs_ops ntfs_fs_ops;
+
+const struct fs_ops *fs_ops_array [4] = {
+    &vfat_fs_ops,
+    &ext2_fs_ops,
+    /* TODO: add btrfs */
+    &ntfs_fs_ops,
+    NULL
+};
+
 /*
  * Free a refcounted inode
  */
@@ -204,29 +217,13 @@ size_t pmapi_read_file(uint16_t *handle, void *buf, size_t sectors)
     return bytes_read;
 }
 
-extern const struct fs_ops vfat_fs_ops;
-extern const struct fs_ops ext2_fs_ops;
-extern const struct fs_ops btrfs_fs_ops;
-extern const struct fs_ops ntfs_fs_ops;
-
-const struct fs_ops *fs_ops_array [4] = {
-    &vfat_fs_ops,
-    &ext2_fs_ops,
-    /* TODO: add btrfs */
-    /*&btrfs_fs_ops,*/
-    NULL,
-    NULL
-};
-
 struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
 {
     struct fs_info *fsp;
-    struct fs_info fs;
     uint8_t disk_devno, disk_cdrom;
     sector_t disk_offset;
     uint16_t disk_heads, disk_sectors, maxtransfer;
     struct part_iter *iter = NULL;
-    uint8_t buff[512];
     struct disk_info diskinfo;
     const struct fs_ops **ops;
     int blk_shift = -1;
@@ -236,16 +233,16 @@ struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
     if (fsp)
         return fsp;
 
+    fsp = malloc(sizeof(struct fs_info));
+    if (!fsp)
+        return NULL;
+
     disk_devno = 0x80 + hdd;
 
-    /* For some unknown reason without this call to a "nop" function
-     * an infinite loop happens, must investigate later
-     * TODO: fix this */
-    do_magic(buff);
 
     if (find_partition(&iter, disk_devno, partition)) {
         printf("Failed to get partition\n");
-        return NULL;
+        goto bail;
     }
     else
         dprintf("part_offset 0x%llx\n", iter->start_lba);
@@ -253,7 +250,7 @@ struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
     disk_offset = iter->start_lba;
 
     if (disk_get_params(disk_devno, &diskinfo))
-        return NULL;
+        goto bail;
 
     disk_heads = diskinfo.head;
     disk_sectors = diskinfo.spt;
@@ -267,26 +264,26 @@ struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
 
 
     /* Default name for the root directory */
-    fs.cwd_name[0] = '/';
+    fsp->cwd_name[0] = '/';
 
     while ((blk_shift < 0) && *ops) {
         /* set up the fs stucture */
-        fs.fs_ops = *ops;
+        fsp->fs_ops = *ops;
 
         /*
          * This boldly assumes that we don't mix FS_NODEV filesystems
          * with FS_DEV filesystems...
          */
-        if (fs.fs_ops->fs_flags & FS_NODEV) {
-            fs.fs_dev = NULL;
+        if (fsp->fs_ops->fs_flags & FS_NODEV) {
+            fsp->fs_dev = NULL;
         } else {
             if (!dev)
             dev = device_init(disk_devno, disk_cdrom, disk_offset,
                       disk_heads, disk_sectors, maxtransfer);
-            fs.fs_dev = dev;
+            fsp->fs_dev = dev;
         }
         /* invoke the fs-specific init code */
-        blk_shift = fs.fs_ops->fs_init(&fs);
+        blk_shift = fsp->fs_ops->fs_init(fsp);
         ops++;
     }
     if (blk_shift < 0) {
@@ -294,24 +291,27 @@ struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
         while (1)
             ;
     }
-    add_fs(&fs, hdd, partition - 1);
-    fsp = &fs;
+    add_fs(fsp, hdd, partition - 1);
 
     /* initialize the cache */
-    if (fs.fs_dev && fs.fs_dev->cache_data)
-        cache_init(fs.fs_dev, blk_shift);
+    if (fsp->fs_dev && fsp->fs_dev->cache_data)
+        cache_init(fsp->fs_dev, blk_shift);
 
     /* start out in the root directory */
-    if (fs.fs_ops->iget_root) {
-        fs.root = fs.fs_ops->iget_root(&fs);
-        fs.cwd = get_inode(fs.root);
+    if (fsp->fs_ops->iget_root) {
+        fsp->root = fsp->fs_ops->iget_root(fsp);
+        fsp->cwd = get_inode(fsp->root);
     }
 
-    if (fs.fs_ops->chdir_start) {
-        if (fs.fs_ops->chdir_start(fsp) < 0)
+    if (fsp->fs_ops->chdir_start) {
+        if (fsp->fs_ops->chdir_start(fsp) < 0)
             printf("Failed to chdir to start directory\n");
     }
     return fsp;
+
+bail:
+    free(fsp);
+    return NULL;
 }
 
 
