@@ -491,49 +491,17 @@ int open_file(const char *name, struct com32_filedata *filedata)
     int rv;
     struct file *file;
     char mangled_name[FILENAME_MAX];
-    uint8_t hdd = 0;
-    uint8_t partition = 0;
-    char buff[4];
+    struct muldisk_path *mul_path;
 
     if (name[0] == '(') {
-        char relative_name[FILENAME_MAX];
-        const char *c = name;
-        int i = 0;
-        int mult = 1;
+        mul_path = muldisk_path_parse(name);
+        if (!mul_path)
+            return -1;
 
-        /* get hdd number */
-        for (++c; *c != ' '; ++c)
-            buff[i++] = *c;
-        buff[i] = '\0';
+        mangle_name(mangled_name, mul_path->relative_name, get_fs_info(mul_path->hdd, mul_path->partition));
 
-        /* str to uint8_t */
-        while (i--) {
-            hdd += (buff[i] - 48) * mult;
-            mult *= 10;
-        }
-
-        /* get partition number */
-        i = 0;
-        for (++c; *c != ')'; ++c)
-            buff[i++] = *c;
-        buff[i] = '\0';
-
-        /* str to uint8_t */
-        mult = 1;
-        while (i--) {
-            partition += (buff[i] - 48) * mult;
-            mult *= 10;
-        }
-
-        i = 0;
-        /* c was on ')' jump ':' and stop at beginning of path */
-        for (c += 2; *c; c++)
-            relative_name[i++] = *c;
-        relative_name[i] = '\0';
-
-        mangle_name(mangled_name, relative_name, get_fs_info(hdd, partition));
-
-        rv = searchdir(mangled_name, get_fs_info(hdd, partition));
+        rv = searchdir(mangled_name, get_fs_info(mul_path->hdd, mul_path->partition));
+        free(mul_path);
 
         if (rv < 0)
             return rv;

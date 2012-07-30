@@ -192,6 +192,7 @@ void mangle_name(char *, const char *, struct fs_info *);
 int searchdir(const char *name, struct fs_info *);
 void _close_file(struct file *);
 size_t pmapi_read_file(uint16_t *handle, void *buf, size_t sectors);
+struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition);
 int open_file(const char *name, struct com32_filedata *filedata);
 void pm_open_file(com32sys_t *);
 void close_file(uint16_t handle);

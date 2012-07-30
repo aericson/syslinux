@@ -17,6 +17,8 @@
 #include "core.h"
 #include "disk.h"
 #include "partiter.h"
+#include "fs.h"
+#include "multidisk.h"
 
 /* 0x80 - 0xFF
  * BIOS limitation */
@@ -102,3 +104,59 @@ bail:
     return -1;
 }
 
+struct muldisk_path* muldisk_path_parse(const char *path)
+{
+    struct muldisk_path *mpath;
+    const char *c = path;
+    char buff[4];
+    uint8_t hdd = 0;
+    uint8_t partition = 0;
+    int i = 0;
+    int mult = 1;
+
+    mpath = malloc(sizeof *mpath);
+    if (!mpath)
+        return NULL;
+
+    if (path[1] == 'h' && path[2] == 'd') {
+        c += 2;
+        /* get hdd number */
+        for (++c; *c && *c != ','; ++c)
+            buff[i++] = *c;
+        if (!*c)
+            goto bail;
+        buff[i] = '\0';
+
+        /* str to uint8_t */
+        while (i--) {
+            hdd += (buff[i] - 48) * mult;
+            mult *= 10;
+        }
+        mpath->hdd = hdd;
+        /* get partition number */
+        i = 0;
+        for (++c; *c && *c != ')'; ++c)
+            buff[i++] = *c;
+        if (!*c)
+            goto bail;
+        buff[i] = '\0';
+
+        /* str to uint8_t */
+        mult = 1;
+        while (i--) {
+            partition += (buff[i] - 48) * mult;
+            mult *= 10;
+        }
+        mpath->partition = partition;
+        i = 0;
+        /* c was on ')' jump it and stop at beginning of path */
+        for (c++; *c; c++)
+            mpath->relative_name[i++] = *c;
+        mpath->relative_name[i] = '\0';
+        return mpath;
+    }
+
+bail:
+    free(mpath);
+    return NULL;
+}
