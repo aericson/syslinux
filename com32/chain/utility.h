@@ -2,7 +2,7 @@
 #define _COM32_CHAIN_UTILITY_H
 
 #include <stdint.h>
-#include <syslinux/disk.h>
+#include <disk.h>
 
 #define bpbUNK	0
 #define bpbV20	1

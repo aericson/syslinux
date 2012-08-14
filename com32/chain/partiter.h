@@ -37,7 +37,7 @@
 #define _COM32_CHAIN_PARTITER_H
 
 #include <stdint.h>
-#include <syslinux/disk.h>
+#include <disk.h>
 
 #define PI_ERRLOAD 3
 #define PI_INSANE 2

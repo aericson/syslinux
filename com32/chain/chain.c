@@ -32,7 +32,7 @@
 #include <syslinux/loadfile.h>
 #include <syslinux/bootrm.h>
 #include <syslinux/config.h>
-#include <syslinux/disk.h>
+#include <disk.h>
 #include <syslinux/video.h>
 #include "common.h"
 #include "chain.h"

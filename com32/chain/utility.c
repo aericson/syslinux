@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <fs.h>
-#include <syslinux/disk.h>
+#include <disk.h>
 #include <syslinux/pmapi.h>
 #include "utility.h"
 

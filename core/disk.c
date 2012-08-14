@@ -3,7 +3,6 @@
  *   Copyright 2003-2009 H. Peter Anvin - All Rights Reserved
  *   Copyright 2009-2010 Intel Corporation; author: H. Peter Anvin
  *   Copyright (C) 2010 Shao Miller
- *   Copyright 2012 Andre Ericson
  *
  *   Permission is hereby granted, free of charge, to any person
  *   obtaining a copy of this software and associated documentation
@@ -56,7 +55,6 @@ int disk_int13_retry(const com32sys_t * inreg, com32sys_t * outreg)
         outreg = &tmpregs;
 
     while (retry--) {
-
         __intcall(0x13, inreg, outreg);
         if (!(outreg->eflags.l & EFLAGS_CF))
             return 0;		/* CF=0, OK */
@@ -74,8 +72,9 @@ int disk_int13_retry(const com32sys_t * inreg, com32sys_t * outreg)
  */
 int disk_get_params(int disk, struct disk_info *const diskinfo)
 {
-    com32sys_t inreg, outreg;
-    struct disk_ebios_eparam *eparam = NULL;
+    static com32sys_t inreg, outreg;
+    struct disk_ebios_eparam *eparam;
+    int rv = 0;
 
     memset(diskinfo, 0, sizeof *diskinfo);
     diskinfo->disk = disk;
@@ -95,11 +94,12 @@ int disk_get_params(int disk, struct disk_info *const diskinfo)
         diskinfo->ebios = 1;
     }
 
+    eparam = lmalloc(sizeof *eparam);
+    if (!eparam)
+        return -1;
+
     /* Get extended disk parameters if ebios == 1 */
     if (diskinfo->ebios) {
-        eparam = lmalloc(sizeof *eparam);
-        if (!eparam)
-            return -1;
         memset(&inreg, 0, sizeof inreg);
         inreg.eax.b[1] = 0x48;
         inreg.edx.b[0] = disk;
@@ -133,8 +133,8 @@ int disk_get_params(int disk, struct disk_info *const diskinfo)
     __intcall(0x13, &inreg, &outreg);
 
     if (outreg.eflags.l & EFLAGS_CF) {
-        lfree(eparam);
-        return diskinfo->ebios ? 0 : -1;
+        rv = diskinfo->ebios ? 0 : -1;
+        goto out;
     }
 
     diskinfo->spt = 0x3f & outreg.ecx.b[0];
@@ -152,8 +152,9 @@ int disk_get_params(int disk, struct disk_info *const diskinfo)
     if (!diskinfo->lbacnt)
         diskinfo->lbacnt = diskinfo->cyl * diskinfo->head * diskinfo->spt;
 
+out:
     lfree(eparam);
-    return 0;
+    return rv;
 }
 
 /**
@@ -171,24 +172,28 @@ void *disk_read_sectors(const struct disk_info *const diskinfo, uint64_t lba,
         uint8_t count)
 {
     com32sys_t inreg;
-    struct disk_ebios_dapa *dapa = NULL;
-    uint8_t *buf = NULL;
-    void *data;
+    struct disk_ebios_dapa *dapa;
+    void *buf;
+    void *data = NULL;
+    uint32_t maxcnt;
+    uint32_t size = 65536;
 
-    if (!count || lba + count > diskinfo->lbacnt)
+    maxcnt = (size - diskinfo->bps) / diskinfo->bps;
+    if (!count || count > maxcnt || lba + count > diskinfo->lbacnt)
         return NULL;
 
     memset(&inreg, 0, sizeof inreg);
 
-    buf = (uint8_t *)lmalloc(diskinfo->bps * count);
+    buf = lmalloc(count * diskinfo->bps);
     if (!buf)
         return NULL;
 
+    dapa = lmalloc(sizeof(*dapa));
+    if (!dapa)
+        goto out;
+
     if (diskinfo->ebios) {
-        dapa = lmalloc(sizeof *dapa);
-        if (!dapa)
-            goto fail;
-        dapa->len = sizeof(struct disk_ebios_dapa);
+        dapa->len = sizeof(*dapa);
         dapa->count = count;
         dapa->off = OFFS(buf);
         dapa->seg = SEG(buf);
@@ -222,19 +227,15 @@ void *disk_read_sectors(const struct disk_info *const diskinfo, uint64_t lba,
     }
 
     if (disk_int13_retry(&inreg, NULL))
-        goto fail;
+        goto out;
 
     data = malloc(count * diskinfo->bps);
     if (data)
         memcpy(data, buf, count * diskinfo->bps);
+out:
     lfree(dapa);
     lfree(buf);
     return data;
-
-fail:
-    lfree(buf);
-    lfree(dapa);
-    return NULL;
 }
 
 /**
@@ -253,24 +254,29 @@ int disk_write_sectors(const struct disk_info *const diskinfo, uint64_t lba,
         const void *data, uint8_t count)
 {
     com32sys_t inreg;
-    struct disk_ebios_dapa *dapa = NULL;
-    uint8_t *buf = NULL;
+    struct disk_ebios_dapa *dapa;
+    void *buf;
+    uint32_t maxcnt;
+    uint32_t size = 65536;
+    int rv = -1;
 
-    if (!count || lba + count > diskinfo->lbacnt)
+    maxcnt = (size - diskinfo->bps) / diskinfo->bps;
+    if (!count || count > maxcnt || lba + count > diskinfo->lbacnt)
         return -1;
 
-    buf = (uint8_t *)lmalloc(diskinfo->bps * count);
+    buf = lmalloc(count * diskinfo->bps);
     if (!buf)
         return -1;
 
     memcpy(buf, data, count * diskinfo->bps);
     memset(&inreg, 0, sizeof inreg);
 
+    dapa = lmalloc(sizeof(*dapa));
+    if (!dapa)
+        goto out;
+
     if (diskinfo->ebios) {
-        dapa = lmalloc(sizeof *dapa);
-        if (!dapa)
-            goto fail;
-        dapa->len = sizeof *dapa;
+        dapa->len = sizeof(*dapa);
         dapa->count = count;
         dapa->off = OFFS(buf);
         dapa->seg = SEG(buf);
@@ -304,17 +310,13 @@ int disk_write_sectors(const struct disk_info *const diskinfo, uint64_t lba,
     }
 
     if (disk_int13_retry(&inreg, NULL))
-        goto fail;
+        goto out;
 
+    rv = 0;			/* ok */
+out:
     lfree(dapa);
     lfree(buf);
-
-    return 0;			/* ok */
-
-fail:
-    lfree(buf);
-    lfree(dapa);
-    return -1;
+    return rv;
 }
 
 /**
@@ -355,7 +357,7 @@ int disk_write_verify_sectors(const struct disk_info *const diskinfo,
 void disk_dos_part_dump(const struct disk_dos_part_entry *const part)
 {
     (void)part;
-    printf("Partition status _____ : 0x%.2x\n"
+    dprintf("Partition status _____ : 0x%.2x\n"
             "Partition CHS start\n"
             "  Cylinder ___________ : 0x%.4x (%u)\n"
             "  Head _______________ : 0x%.2x (%u)\n"
