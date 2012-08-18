@@ -21,6 +21,7 @@ int new_linux_kernel(char *okernel, char *ocmdline)
 	void *kernel_data;
 	size_t kernel_len;
 	bool opt_quiet = false;
+	bool accept_comma = false; /* multidisk syntax workaround for initramfs */
 	char initrd_name[256];
 	char cmdline_buf[256], *cmdline;
 
@@ -107,12 +108,20 @@ int new_linux_kernel(char *okernel, char *ocmdline)
 
 		temp += 6; /* strlen("initrd") */
 		do {
+		    accept_comma = false;
 		    char *p = initrd_name;
 
 		    temp++;	/* Skip = or , */
 
-		    while (*temp != ' ' && *temp != ',' && *temp)
-			*p++ = *temp++;
+		    if (*temp == '(') /* multidisk path */
+			    accept_comma = true;
+
+		    /* should not stop at any comma before ')' if it's a multidisk path */
+		    while (*temp != ' ' && (accept_comma || *temp != ',') && *temp) {
+			    if (*temp == ')')
+				accept_comma = false;
+			    *p++ = *temp++;
+		    }
 		    *p = '\0';
 
 		    if (!opt_quiet)
