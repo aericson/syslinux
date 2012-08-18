@@ -494,7 +494,7 @@ int open_file(const char *name, struct com32_filedata *filedata)
     struct muldisk_path *mul_path;
 
     if (name[0] == '(') {
-        mul_path = muldisk_path_parse(name);
+        mul_path = hdd_part_from_mdpath(name);
         if (!mul_path)
             return -1;
 

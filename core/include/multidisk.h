@@ -11,6 +11,6 @@ struct muldisk_path {
 int find_partition(struct part_iter **_iter, int drive, int partition);
 int add_fs(struct fs_info *fs, uint8_t disk, uint8_t partition);
 struct fs_info *get_fs(uint8_t disk, uint8_t partition);
-struct muldisk_path* muldisk_path_parse(const char *path);
+struct muldisk_path* hdd_part_from_mdpath(const char *path);
 
 #endif /* MULTIDISK_H */

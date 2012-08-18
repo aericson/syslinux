@@ -16,7 +16,7 @@ DIR *opendir(const char *path)
 
     if (path[0] == '(') {
 
-        mul_path = muldisk_path_parse(path);
+        mul_path = hdd_part_from_mdpath(path);
         if (!mul_path)
             return NULL;
 

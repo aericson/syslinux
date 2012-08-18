@@ -104,13 +104,28 @@ bail:
     return -1;
 }
 
-struct muldisk_path* muldisk_path_parse(const char *path)
+static uint8_t charhex_to_hex(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 0xa;
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 0xa;
+    return 0xff;
+}
+
+struct muldisk_path* hdd_part_from_mdpath(const char *path)
 {
     struct muldisk_path *mpath;
+    struct disk_dos_mbr *mbr = NULL;
+    struct disk_info diskinfo;
     const char *c = path;
     char buff[4];
     uint8_t hdd = 0;
     uint8_t partition = 0;
+    uint32_t mbr_sig = 0;
+    int disk;
     int i = 0;
     int mult = 1;
 
@@ -120,6 +135,7 @@ struct muldisk_path* muldisk_path_parse(const char *path)
 
     if (path[1] == 'h' && path[2] == 'd') {
         c += 2;
+
         /* get hdd number */
         for (++c; *c && *c != ','; ++c)
             buff[i++] = *c;
@@ -129,32 +145,68 @@ struct muldisk_path* muldisk_path_parse(const char *path)
 
         /* str to uint8_t */
         while (i--) {
+            if (buff[i] < '0' || buff[i] > '9')
+                goto bail;
             hdd += (buff[i] - 48) * mult;
             mult *= 10;
         }
-        mpath->hdd = hdd;
-        /* get partition number */
-        i = 0;
-        for (++c; *c && *c != ')'; ++c)
-            buff[i++] = *c;
-        if (!*c)
-            goto bail;
-        buff[i] = '\0';
+    } else if (!strncmp(path + 1, "mbr:0x", 6)) {
+        c += 6;
 
-        /* str to uint8_t */
-        mult = 1;
-        while (i--) {
-            partition += (buff[i] - 48) * mult;
-            mult *= 10;
+        /* get mbr sig */
+        for (++c; *c && *c != ','; ++c) {
+            mbr_sig = mbr_sig << 4;
+            i = charhex_to_hex(*c);
+            if (i == 0xff)
+                goto bail;
+            mbr_sig += i;
         }
-        mpath->partition = partition;
-        i = 0;
-        /* c was on ')' jump it and stop at beginning of path */
-        for (c++; *c; c++)
-            mpath->relative_name[i++] = *c;
-        mpath->relative_name[i] = '\0';
-        return mpath;
+
+        /* find hdd from mbr */
+        for (disk = 0x80; disk < 0xff; disk++) {
+            if (disk_get_params(disk, &diskinfo))
+                continue;
+            if (!(mbr = disk_read_sectors(&diskinfo, 0, 1)))
+                continue;
+            if (mbr->sig != disk_mbr_sig_magic)
+                continue;
+            if (mbr_sig == mbr->disk_sig) {
+                hdd = disk - 0x80;
+                free(mbr);
+                break;
+            }
+            free(mbr);
+        }
+        if (disk == 0xff)
+            goto bail;
+
+    } else {
+        goto bail;
     }
+    /* get partition number */
+    i = 0;
+    for (++c; *c && *c != ')'; ++c)
+        buff[i++] = *c;
+    if (!*c)
+        goto bail;
+    buff[i] = '\0';
+
+    /* str to uint8_t */
+    mult = 1;
+    while (i--) {
+        if (buff[i] < '0' || buff[i] > '9')
+            goto bail;
+        partition += (buff[i] - 48) * mult;
+        mult *= 10;
+    }
+    mpath->partition = partition;
+    mpath->hdd = hdd;
+    i = 0;
+    /* c was on ')' jump it and stop at beginning of path */
+    for (c++; *c; c++)
+        mpath->relative_name[i++] = *c;
+    mpath->relative_name[i] = '\0';
+    return mpath;
 
 bail:
     free(mpath);
