@@ -16,7 +16,7 @@ topdir = ../..
 MAKEDIR = $(topdir)/mk
 include $(MAKEDIR)/elf.mk
 
-OBJS = chain.o partiter.o utility.o options.o mangle.o
+OBJS = chain.o utility.o options.o mangle.o
 
 all: chain.c32
 

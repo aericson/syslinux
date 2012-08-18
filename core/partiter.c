@@ -37,14 +37,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include "zlib.h"
 #include "disk.h"
 #include "partiter.h"
-#include "zlib.h"
 
 #define ost_is_ext(type) ((type) == 0x05 || (type) == 0x0F || (type) == 0x85)
 #define ost_is_nondata(type) (ost_is_ext(type) || (type) == 0x00)
 #define sane(s,l) ((s)+(l) > (s))
-#define error(msg) printf("%s\n", msg)
+#define error(msg) fputs(msg, stderr);
 
 /* forwards */
 
@@ -749,6 +749,7 @@ struct part_iter *pi_begin(const struct disk_info *di, int stepall)
 	/* Verify checksum, fallback to backup, then bail if invalid */
 	if (gpt_check_hdr_crc(di, &gpth))
 	    goto bail;
+
 	gpt_loff = gpth->lba_table;
 	gpt_lsiz = (uint64_t)gpth->part_size * gpth->part_count;
 	gpt_lcnt = (gpt_lsiz + di->bps - 1) / di->bps;
