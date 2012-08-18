@@ -39,6 +39,7 @@
 #include <stdarg.h>
 #include "disk.h"
 #include "partiter.h"
+#include "zlib.h"
 
 #define ost_is_ext(type) ((type) == 0x05 || (type) == 0x0F || (type) == 0x85)
 #define ost_is_nondata(type) (ost_is_ext(type) || (type) == 0x00)
@@ -560,8 +561,6 @@ int guid_is0(const struct guid *guid)
     return !*(const uint64_t *)guid && !*((const uint64_t *)guid + 1);
 }
 
-/* won't work as zlib is not on core */
-#if 0
 static int check_crc(uint32_t crc_match, const uint8_t *buf, unsigned int siz)
 {
     uint32_t crc;
@@ -601,7 +600,6 @@ static int gpt_check_hdr_crc(const struct disk_info * const diskinfo, struct dis
 
     return 0;
 }
-#endif
 
 /*
  * ----------------------------------------------------------------------------
@@ -749,11 +747,8 @@ struct part_iter *pi_begin(const struct disk_info *di, int stepall)
 	disk_gpt_header_dump(gpth);
 #endif
 	/* Verify checksum, fallback to backup, then bail if invalid */
-	/* TODO: mv zlib for core or rewrite the md5 check
 	if (gpt_check_hdr_crc(di, &gpth))
 	    goto bail;
-    
-	*/
 	gpt_loff = gpth->lba_table;
 	gpt_lsiz = (uint64_t)gpth->part_size * gpth->part_count;
 	gpt_lcnt = (gpt_lsiz + di->bps - 1) / di->bps;
@@ -778,8 +773,6 @@ struct part_iter *pi_begin(const struct disk_info *di, int stepall)
 	    error("Couldn't read GPT partition list.\n");
 	    goto bail;
 	}
-#if 0
-	/* This won't work for now as zlib is not on core */
 	/* Check array checksum(s). */
 	if (check_crc(gpth->table_chksum, (const uint8_t *)gptl, (unsigned int)gpt_lsiz)) {
 	    error("WARNING: GPT partition list checksum invalid, trying backup.\n");
@@ -794,7 +787,6 @@ struct part_iter *pi_begin(const struct disk_info *di, int stepall)
 		goto bail;
 	    }
 	}
-#endif
 	/* allocate iterator and exit */
 	iter = pi_new(typegpt, di, stepall, gpth, gptl);
     } else {
