@@ -22,6 +22,9 @@ struct file files[MAX_OPEN];
 #define MAX_SYMLINK_CNT	20
 #define MAX_SYMLINK_BUF 4096
 
+/* MaxTransfer for multidisk access */
+#define MAX_TRANSFER 127
+
 /*
  * Get a new inode structure
  */
@@ -36,18 +39,11 @@ struct inode *alloc_inode(struct fs_info *fs, uint32_t ino, size_t data)
     return inode;
 }
 
-extern const struct fs_ops vfat_fs_ops;
-extern const struct fs_ops ext2_fs_ops;
-extern const struct fs_ops btrfs_fs_ops;
-extern const struct fs_ops ntfs_fs_ops;
-
-const struct fs_ops *fs_ops_array [4] = {
-    &vfat_fs_ops,
-    &ext2_fs_ops,
-    /* TODO: add btrfs */
-    &ntfs_fs_ops,
-    NULL
-};
+/*
+ * Needs to keep ROOT_FS_OPS after fs_init()
+ * to be used by multidisk
+ */
+const struct fs_ops **p_ops;
 
 /*
  * Free a refcounted inode
@@ -255,12 +251,10 @@ struct fs_info *get_fs_info(uint8_t hdd, uint8_t partition)
     disk_heads = diskinfo.head;
     disk_sectors = diskinfo.spt;
 
-    /* force those values for now 
-     * TODO: fix this */
     disk_cdrom = 0;
-    maxtransfer = 127;
+    maxtransfer = MAX_TRANSFER;
 
-    ops = fs_ops_array;
+    ops = p_ops;
 
 
     /* Default name for the root directory */
@@ -602,6 +596,7 @@ void fs_init(com32sys_t *regs)
     struct device *dev = NULL;
     /* ops is a ptr list for several fs_ops */
     const struct fs_ops **ops = (const struct fs_ops **)regs->eax.l;
+    p_ops = ops;
 
     /* Initialize malloc() */
     mem_init();
