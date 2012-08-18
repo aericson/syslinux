@@ -62,7 +62,8 @@ NASMOPT  += $(NASMDEBUG)
 
 PREPCORE = ../lzo/prepcore
 
-CFLAGS += -D__SYSLINUX_CORE__
+# Make zlib take less space
+CFLAGS	+= -DDYNAMIC_CRC_TABLE -DBUILDFIXED -DHAVE_MEMCPY -D__SYSLINUX_CORE__
 
 # The DATE is set on the make command line when building binaries for
 # official release.  Otherwise, substitute a hex string that is pretty much
